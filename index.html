@@ -256,10 +256,15 @@ function scaleStatus(txt, cls) { $('scaleTxt').textContent = 'Vekt: ' + txt; $('
 async function setupScale() {
   scaleStatus('kobler til …', 'warn');
   const server = await device.gatt.connect();
-  const services = await server.getPrimaryServices().catch(() => []);
-  let svc = services.find(s => s.uuid === DOT.service), p = DOT, kind = 'dot';
-  if (!svc) { svc = services.find(s => s.uuid === OLD.service); p = OLD; kind = 'old'; }
-  if (!svc) throw new Error('fant ikke vekttjenesten');
+  // spør direkte etter hver tjeneste (Bluefy støtter ikke alltid «list alle tjenester»)
+  let svc = await server.getPrimaryService(DOT.service).catch(() => null), p = DOT, kind = 'dot';
+  if (!svc) { svc = await server.getPrimaryService(OLD.service).catch(() => null); p = OLD; kind = 'old'; }
+  if (!svc) {
+    const list = await server.getPrimaryServices().catch(() => []);
+    if (!svc) svc = list.find(s => s.uuid === DOT.service) || null;
+    if (!svc) { svc = list.find(s => s.uuid === OLD.service) || null; if (svc) { p = OLD; kind = 'old'; } }
+  }
+  if (!svc) throw new Error(`fant ikke vekttjenesten på «${device.name || 'ukjent enhet'}». Valgte du vekten?`);
   const notify = await svc.getCharacteristic(p.notify);
   cmdChar = await svc.getCharacteristic(p.cmd).catch(() => null);
   proto = kind;
