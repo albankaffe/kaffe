@@ -241,13 +241,17 @@ function parseOld(raw) {
   if (raw.length < 4) return;
   onWeight(new DataView(raw.buffer, raw.byteOffset, raw.byteLength).getInt16(1, true) / 10);
 }
+let lastScaleError = '';
 async function sendScale(bytes) {
   if (!cmdChar) return false;
   try {
-    if (cmdChar.properties.writeWithoutResponse) await cmdChar.writeValueWithoutResponse(bytes);
-    else await cmdChar.writeValue(bytes);
-    return true;
-  } catch { return false; }
+    // prøv skrivemåtene i tur og orden (Bluefy støtter ikke alltid alle)
+    const ways = [cmdChar.writeValueWithoutResponse, cmdChar.writeValueWithResponse, cmdChar.writeValue].filter(Boolean);
+    for (const fn of ways) {
+      try { await fn.call(cmdChar, bytes); return true; } catch (e) { lastScaleError = e.message; }
+    }
+    return false;
+  } catch (e) { lastScaleError = e.message; return false; }
 }
 const tareCmd = () => proto === 'dot' ? buildCmd(0x03, 0x0d) : new Uint8Array([0x00]);
 
@@ -311,7 +315,12 @@ $('connect').onclick = () => {
   if (device?.gatt?.connected) { wantScale = false; device.gatt.disconnect(); }
   else connectScale();
 };
-$('tare').onclick = () => sendScale(tareCmd());
+$('tare').onclick = async () => { if (!await sendScale(tareCmd())) scaleStatus('taring feilet: ' + lastScaleError, 'err'); };
+async function tareScale() {
+  if (await sendScale(tareCmd())) return true;
+  scaleStatus('taring feilet: ' + lastScaleError, 'err');
+  return false;
+}
 
 // ---------- vektdata, flyt ----------
 let weight = null;                 // siste rå vekt fra vekten
@@ -336,17 +345,23 @@ function regressionSlope(pts) {
 
 // ================= SHOT-LOGIKK =================
 // fase: idle → brewing (pumpe går) → drip (pumpe stoppet, samler etterdrypp) → idle
-const shot = { phase: 'idle', startMs: 0, samples: [], baseline: 0, tarePending: false, tareDeadline: 0,
+const shot = { phase: 'idle', startMs: 0, samples: [], baseline: 0, pre: null, tareWatchUntil: 0, tareSeen: false,
                stopAt: null, weightAtStop: null, signalled: false, near: false, source: '', finishTimer: null };
 const DRIP_MS = 5000;
 
 function startShot(startMs, source) {
   if (shot.phase === 'drip') finishShot();
-  Object.assign(shot, { phase: 'brewing', startMs, samples: [], baseline: weight, stopAt: null,
-                        weightAtStop: null, signalled: false, near: false, source });
-  if (settings.autoTare && cmdChar) {
-    sendScale(tareCmd()); shot.baseline = 0; shot.tarePending = true; shot.tareDeadline = Date.now() + 1500;
-  } else shot.tarePending = false;
+  // Trekker alltid fra vekten ved start i programvaren. Hvis vekten selv tarer (kommer til ~0),
+  // bytter vi til vektens nullpunkt. Da blir det riktig uansett om taringen er rask, treg eller feiler.
+  Object.assign(shot, { phase: 'brewing', startMs, samples: [], baseline: weight, pre: weight, tareSeen: false,
+                        tareWatchUntil: 0, stopAt: null, weightAtStop: null, signalled: false, near: false, source });
+  if (settings.autoTare && cmdChar && weight != null && Math.abs(weight) >= 1) {
+    shot.tareWatchUntil = Date.now() + 6000;
+    tareScale().then(ok => {
+      // ett nytt forsøk hvis vekten ikke har reagert etter et sekund
+      if (ok) setTimeout(() => { if (shot.phase === 'brewing' && !shot.tareSeen && shot.tareWatchUntil) tareScale(); }, 1000);
+    });
+  }
   viewing = null; markSelected();
   $('chartTitle').textContent = 'Nåværende trekk';
   $('manual').textContent = 'Stopp manuelt';
@@ -366,12 +381,12 @@ function stopShot(finalSec, kind) {
 function currentShotWeight() { const s = shot.samples; return s.length ? s[s.length - 1][1] : 0; }
 function shotOnWeight(now, w) {
   if (shot.phase === 'idle') return;
-  if (shot.tarePending) {
-    if (Math.abs(w) < 2) shot.tarePending = false;
-    else if (now > shot.tareDeadline) { shot.tarePending = false; shot.baseline = w; }   // taring feilet: trekk fra i stedet
-    else return;
+  if (shot.baseline == null) { shot.baseline = w; shot.pre = w; }   // vekten hadde ikke målt ennå da trekket startet
+  // vekten har tart: målingen hopper fra koppvekten til ~0
+  if (!shot.tareSeen && shot.tareWatchUntil && now < shot.tareWatchUntil
+      && Math.abs(w) < 1.5 && shot.pre != null && Math.abs(shot.pre) >= 3) {
+    shot.tareSeen = true; shot.baseline = 0;
   }
-  if (shot.baseline == null) shot.baseline = w;   // vekten hadde ikke målt ennå da trekket startet
   const t = (now - shot.startMs) / 1000, val = Math.round((w - shot.baseline) * 10) / 10;
   shot.samples.push([Math.round(t * 100) / 100, val]);
   if (shot.phase === 'brewing') checkSignal(val);
@@ -591,7 +606,7 @@ function shotTime() {
 }
 let lastShotTime = 0;
 function render() {
-  const showW = shot.phase !== 'idle' && !shot.tarePending ? currentShotWeight() : weight;
+  const showW = shot.phase !== 'idle' ? currentShotWeight() : weight;
   $('w').textContent = nf1(showW);
   $('flow').textContent = flow == null ? '–' : nf1(Math.max(0, flow));
   if (shot.phase !== 'idle') lastShotTime = shotTime();
@@ -602,7 +617,7 @@ function render() {
   if (shot.phase === 'brewing') {
     if (shot.signalled) { hero.classList.add('stop'); banner = 'STOPP NÅ'; }
     else if (shot.near) { hero.classList.add('near'); banner = `Snart … stopp ved ${nf1(settings.target - dripEstimate())} g`; }
-    else banner = shot.tarePending ? 'Tarer …' : (settings.target > 0 ? `Mål ${nf1(settings.target)} g` : 'Trekker …');
+    else banner = settings.target > 0 ? `Mål ${nf1(settings.target)} g` : 'Trekker …';
   } else if (shot.phase === 'drip') banner = `Pumpe stoppet på ${nf1(shot.stopAt)} s, samler etterdrypp …`;
   else banner = lastInfo || (micraOk ? 'Klar. Start pumpen.' : 'Koble til Micraen, eller bruk «Start manuelt».');
   $('banner').textContent = banner;
