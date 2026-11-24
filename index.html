@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#141210" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f3ef" media="(prefers-color-scheme: light)">
+<title>Kaffe-dashboard</title>
+<style>
+  :root {
+    --bg:#f6f3ef; --fg:#1d1b19; --muted:#7a736b; --card:#fffdfa; --line:#e6e1da;
+    --accent:#b5651d; --accent-soft:#f3e3d3; --ok:#2e7d4f; --ok-soft:#dcefe3; --warn:#b7791f; --err:#b3261e;
+    --flow:#3b6fb6; --ghost:#c9c1b7; --target:#2e7d4f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#141210; --fg:#f2ede7; --muted:#a39b91; --card:#1d1a17; --line:#332e29;
+      --accent:#e0914a; --accent-soft:#3a2a1c; --ok:#5fbf86; --ok-soft:#1c3326; --warn:#e0b04a; --err:#f08a80;
+      --flow:#7aa7e8; --ghost:#4a443d; --target:#5fbf86;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.45 -apple-system, system-ui, sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px 48px; }
+  header { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+  h1 { font-size:20px; margin:0 auto 0 0; letter-spacing:-.2px; }
+  h2 { font-size:15px; margin:0 0 10px; color:var(--muted); font-weight:600; }
+  .pill { display:inline-flex; align-items:center; gap:8px; padding:6px 12px; border-radius:999px;
+          background:var(--card); border:1px solid var(--line); font-size:14px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--ghost); flex:none; }
+  .dot.ok { background:var(--ok); } .dot.warn { background:var(--warn); } .dot.err { background:var(--err); }
+  button { font:inherit; font-size:14px; padding:8px 14px; border-radius:10px; border:1px solid var(--line);
+           background:var(--card); color:var(--fg); cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  button:disabled { opacity:.45; cursor:default; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px; }
+  .grid { display:grid; gap:16px; grid-template-columns: 1fr; }
+  @media (min-width: 900px) { .grid { grid-template-columns: 1.15fr 1fr; } }
+
+  /* hovedtall */
+  .hero { display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; transition: background .25s, border-color .25s; }
+  .hero .big { font-size:clamp(40px, 9vw, 76px); font-weight:650; font-variant-numeric:tabular-nums; letter-spacing:-1.5px; line-height:1; }
+  .hero .big small { font-size:.38em; color:var(--muted); font-weight:500; letter-spacing:0; margin-left:2px; }
+  .hero .lbl { color:var(--muted); font-size:13px; margin-bottom:6px; }
+  .hero.near { background:var(--accent-soft); border-color:var(--accent); }
+  .hero.stop { background:var(--ok-soft); border-color:var(--ok); }
+  .banner { grid-column: 1 / -1; min-height:24px; font-weight:600; font-size:15px; color:var(--muted); }
+  .hero.near .banner { color:var(--accent); } .hero.stop .banner { color:var(--ok); font-size:20px; }
+
+  .controls { display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; margin-top:16px; }
+  label.f { display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted); }
+  label.f input { width:92px; font:inherit; font-size:18px; padding:6px 10px; border-radius:10px;
+                  border:1px solid var(--line); background:var(--bg); color:var(--fg); font-variant-numeric:tabular-nums; }
+  label.c { display:flex; gap:6px; align-items:center; font-size:14px; }
+  .hint { font-size:13px; color:var(--muted); }
+
+  canvas { width:100%; height:300px; display:block; }
+  .legend { display:flex; gap:16px; font-size:13px; color:var(--muted); margin-top:6px; flex-wrap:wrap; }
+  .legend i { display:inline-block; width:14px; height:3px; border-radius:2px; vertical-align:middle; margin-right:6px; }
+
+  table { width:100%; border-collapse:collapse; font-size:14px; font-variant-numeric:tabular-nums; }
+  th { text-align:left; color:var(--muted); font-weight:500; padding:6px 8px; border-bottom:1px solid var(--line); }
+  td { padding:7px 8px; border-bottom:1px solid var(--line); }
+  tr.sel td { background:var(--accent-soft); }
+  tbody tr { cursor:pointer; }
+  .empty { color:var(--muted); font-size:14px; padding:12px 0; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .stats { display:flex; gap:22px; flex-wrap:wrap; font-size:14px; color:var(--muted); margin-top:14px; }
+  .stats b { display:block; color:var(--fg); font-size:18px; font-variant-numeric:tabular-nums; }
+  .tablewrap { overflow-x:auto; }
+
+  /* telefon */
+  @media (max-width: 600px) {
+    main { padding:12px 12px 40px; }
+    header { gap:8px; }
+    h1 { width:100%; font-size:18px; }
+    .pill { font-size:13px; padding:5px 10px; }
+    header button { padding:7px 12px; }
+    .card { padding:14px; border-radius:14px; }
+    .hero { gap:4px; }
+    .hero .big { font-size:clamp(30px, 10.5vw, 48px); letter-spacing:-1px; }
+    .hero .big small { font-size:.4em; }
+    .hero.stop .banner { font-size:24px; }
+    canvas { height:220px; }
+    .controls { gap:12px; }
+    .controls .row { margin-left:0 !important; }
+    .hide-sm { display:none; }
+    td, th { padding:6px 5px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Kaffe-dashboard</h1>
+    <span class="pill"><span class="dot" id="scaleDot"></span><span id="scaleTxt">Vekt: ikke tilkoblet</span></span>
+    <button class="primary" id="connect">Koble til vekt</button>
+    <span class="pill" title="" id="micraPill"><span class="dot" id="micraDot"></span><span id="micraTxt">Micra: ikke tilkoblet</span></span>
+    <button class="primary" id="micraBtn">Koble til Micra</button>
+    <span class="pill"><span id="temp">– °C</span></span>
+  </header>
+
+  <div class="grid">
+    <section>
+      <div class="card hero" id="hero">
+        <div><div class="lbl">Vekt</div><div class="big"><span id="w">–</span><small>g</small></div></div>
+        <div><div class="lbl">Tid</div><div class="big"><span id="t">0,0</span><small>s</small></div></div>
+        <div><div class="lbl">Flyt</div><div class="big"><span id="flow">–</span><small>g/s</small></div></div>
+        <div class="banner" id="banner">Trekk en shot, så starter alt automatisk.</div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="controls">
+          <label class="f">Dose inn (g)<input id="dose" type="number" step="0.1" min="0" inputmode="decimal"></label>
+          <label class="f">Målvekt ut (g)<input id="target" type="number" step="0.5" min="0" inputmode="decimal"></label>
+          <div class="hint" id="ratio">Forhold: –</div>
+          <div class="hint" id="dripInfo">Etterdrypp: –</div>
+        </div>
+        <div class="controls">
+          <label class="c"><input type="checkbox" id="autoTare" checked> Tarer når pumpen starter</label>
+          <label class="c"><input type="checkbox" id="sound" checked> Lyd ved stopp</label>
+          <div class="row" style="margin-left:auto">
+            <button id="tare" disabled>Tarer</button>
+            <button id="manual">Start manuelt</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 id="chartTitle">Nåværende trekk</h2>
+      <canvas id="chart"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>Vekt</span>
+        <span><i style="background:var(--flow)"></i>Flyt</span>
+        <span><i style="background:var(--ghost)"></i>Forrige trekk</span>
+        <span><i style="background:var(--target)"></i>Målvekt</span>
+      </div>
+      <div class="stats" id="shotStats"></div>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:16px">
+    <div class="row" style="justify-content:space-between; margin-bottom:6px">
+      <h2 style="margin:0">Historikk</h2>
+      <div class="row">
+        <button id="export">Eksporter</button>
+        <button id="delete" disabled>Slett valgt</button>
+      </div>
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Når</th><th>Tid</th><th>Ut</th><th>Inn</th><th>Forhold</th><th class="hide-sm">Snittflyt</th><th class="hide-sm">Mål</th></tr></thead>
+      <tbody id="hist"></tbody>
+    </table></div>
+    <div class="empty" id="histEmpty">Ingen trekk lagret ennå.</div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const nf1 = v => v == null || isNaN(v) ? '–' : v.toLocaleString('no-NO', {minimumFractionDigits:1, maximumFractionDigits:1});
+
+// ---------- lagring ----------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+let shots = store.get('kaffe.shots', []);
+const settings = Object.assign({dose: 18, target: 36, autoTare: true, sound: true}, store.get('kaffe.settings', {}));
+$('dose').value = settings.dose; $('target').value = settings.target;
+$('autoTare').checked = settings.autoTare; $('sound').checked = settings.sound;
+function saveSettings() {
+  settings.dose = parseFloat($('dose').value) || 0;
+  settings.target = parseFloat($('target').value) || 0;
+  settings.autoTare = $('autoTare').checked; settings.sound = $('sound').checked;
+  store.set('kaffe.settings', settings); renderTargets(); drawChart();
+}
+for (const id of ['dose','target','autoTare','sound']) $(id).addEventListener('change', saveSettings);
+$('dose').addEventListener('input', saveSettings); $('target').addEventListener('input', saveSettings);
+
+// ---------- lyd ----------
+let audio = null;
+function ensureAudio() { try { audio ||= new AudioContext(); audio.resume(); } catch {} }
+document.addEventListener('click', ensureAudio, {capture:true});
+function beep(freq = 880, ms = 180, times = 2) {
+  if (!settings.sound || !audio) return;
+  for (let i = 0; i < times; i++) {
+    const o = audio.createOscillator(), g = audio.createGain(), t0 = audio.currentTime + i * (ms + 90) / 1000;
+    o.frequency.value = freq; o.connect(g); g.connect(audio.destination);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.3, t0 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms / 1000);
+    o.start(t0); o.stop(t0 + ms / 1000 + 0.05);
+  }
+}
+
+// ---------- etterdrypp (lært fra siste trekk) ----------
+function dripEstimate() {
+  const d = shots.slice(0, 6).map(s => s.drip).filter(v => typeof v === 'number' && v >= 0 && v < 15);
+  if (d.length < 2) return 2.0;
+  d.sort((a, b) => a - b);
+  return d[Math.floor(d.length / 2)];
+}
+function renderTargets() {
+  const r = settings.dose > 0 && settings.target > 0 ? settings.target / settings.dose : null;
+  $('ratio').textContent = 'Forhold: ' + (r ? '1:' + nf1(r) : '–');
+  $('dripInfo').textContent = `Etterdrypp: ~${nf1(dripEstimate())} g → stopp ved ${nf1(Math.max(0, settings.target - dripEstimate()))} g`;
+}
+
+// ================= VEKT (Timemore Dot, Web Bluetooth) =================
+const u16 = n => BluetoothUUID.canonicalUUID(n);
+const DOT = { service: u16(0xfff0), notify: u16(0xfff1), cmd: u16(0xfff2) };
+const OLD = { service: u16(0x181d), notify: u16(0x2a9d), cmd: '553f4e49-bf21-4468-9c6c-0e4fb5b17697' };
+let device = null, cmdChar = null, proto = null, wantScale = false;
+
+function crc16Ibm(data) {
+  let crc = 0xffff;
+  for (const b of data) { crc ^= b; for (let j = 0; j < 8; j++) crc = (crc & 1) ? (crc >> 1) ^ 0xa001 : crc >> 1; }
+  return crc;
+}
+function buildCmd(opcode, cmdId, data = []) {
+  const len = data.length, p = new Uint8Array(6 + len);
+  p.set([0xa5, 0x5a, opcode, cmdId, (len >> 8) & 0xff, len & 0xff]); p.set(data, 6);
+  const crc = crc16Ibm(p), f = new Uint8Array(8 + len);
+  f.set(p); f[6 + len] = (crc >> 8) & 0xff; f[7 + len] = crc & 0xff; return f;
+}
+function parseDot(raw) {
+  let off = 0;
+  while (off <= raw.length - 8) {
+    if (raw[off] !== 0xa5 || raw[off+1] !== 0x5a) { off++; continue; }
+    const opcode = raw[off+2], cmdId = raw[off+3], len = (raw[off+4] << 8) | raw[off+5];
+    if (len > raw.length - (off + 6)) break;
+    const d = raw.slice(off + 6, off + 6 + len);
+    if ((opcode === 0x01 || opcode === 0x02) && cmdId === 0x01 && d.length >= 8)
+      onWeight(((d[0] << 24) | (d[1] << 16) | (d[2] << 8) | d[3]) / 10);
+    off += Math.max(8, 6 + len + 2);
+  }
+}
+function parseOld(raw) {
+  if (raw.length < 4) return;
+  onWeight(new DataView(raw.buffer, raw.byteOffset, raw.byteLength).getInt16(1, true) / 10);
+}
+async function sendScale(bytes) {
+  if (!cmdChar) return false;
+  try {
+    if (cmdChar.properties.writeWithoutResponse) await cmdChar.writeValueWithoutResponse(bytes);
+    else await cmdChar.writeValue(bytes);
+    return true;
+  } catch { return false; }
+}
+const tareCmd = () => proto === 'dot' ? buildCmd(0x03, 0x0d) : new Uint8Array([0x00]);
+
+function scaleStatus(txt, cls) { $('scaleTxt').textContent = 'Vekt: ' + txt; $('scaleDot').className = 'dot ' + (cls || ''); }
+
+async function setupScale() {
+  scaleStatus('kobler til …', 'warn');
+  const server = await device.gatt.connect();
+  const services = await server.getPrimaryServices().catch(() => []);
+  let svc = services.find(s => s.uuid === DOT.service), p = DOT, kind = 'dot';
+  if (!svc) { svc = services.find(s => s.uuid === OLD.service); p = OLD; kind = 'old'; }
+  if (!svc) throw new Error('fant ikke vekttjenesten');
+  const notify = await svc.getCharacteristic(p.notify);
+  cmdChar = await svc.getCharacteristic(p.cmd).catch(() => null);
+  proto = kind;
+  notify.addEventListener('characteristicvaluechanged', ev => {
+    const raw = new Uint8Array(ev.target.value.buffer.slice(0));
+    try { kind === 'dot' ? parseDot(raw) : parseOld(raw); } catch {}
+  });
+  await notify.startNotifications();
+  if (kind === 'dot') {
+    await new Promise(r => setTimeout(r, 500));
+    await sendScale(buildCmd(0x03, 0x06, [0x00]));            // gram
+    await new Promise(r => setTimeout(r, 200));
+    await sendScale(buildCmd(0x03, 0x08, [0x01, 0x00]));      // standardmodus
+  }
+  scaleStatus(device.name || 'tilkoblet', 'ok');
+  $('tare').disabled = !cmdChar;
+  $('connect').textContent = 'Koble fra vekt';
+}
+async function connectScale() {
+  if (!navigator.bluetooth) { scaleStatus('nettleseren støtter ikke Bluetooth (bruk Bluefy eller Chrome)', 'err'); return; }
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true, optionalServices: [DOT.service, OLD.service] });
+    device.addEventListener('gattserverdisconnected', onScaleLost);
+    wantScale = true;
+    store.set('kaffe.scaleName', device.name || '');
+    await setupScale();
+  } catch (e) {
+    scaleStatus(e.name === 'NotFoundError' ? 'ingen valgt' : 'feil: ' + e.message, e.name === 'NotFoundError' ? '' : 'err');
+  }
+}
+async function onScaleLost() {
+  cmdChar = null; $('tare').disabled = true;
+  if (!wantScale) { scaleStatus('ikke tilkoblet'); $('connect').textContent = 'Koble til vekt'; return; }
+  for (let i = 1; wantScale && i <= 10; i++) {
+    scaleStatus(`mistet forbindelsen, prøver igjen (${i}) …`, 'warn');
+    await new Promise(r => setTimeout(r, 2000));
+    try { await setupScale(); return; } catch {}
+  }
+  scaleStatus('frakoblet. Trykk «Koble til vekt».', 'err');
+  $('connect').textContent = 'Koble til vekt';
+}
+$('connect').onclick = () => {
+  if (device?.gatt?.connected) { wantScale = false; device.gatt.disconnect(); }
+  else connectScale();
+};
+$('tare').onclick = () => sendScale(tareCmd());
+
+// ---------- vektdata, flyt ----------
+let weight = null;                 // siste rå vekt fra vekten
+const recent = [];                 // [ms, vekt] siste 1,2 s for flyt
+let flow = null;
+function onWeight(w) {
+  const now = Date.now();
+  weight = w;
+  recent.push([now, w]);
+  while (recent.length && now - recent[0][0] > 1200) recent.shift();
+  flow = regressionSlope(recent);
+  shotOnWeight(now, w);
+  render();
+}
+function regressionSlope(pts) {
+  if (pts.length < 3 || pts[pts.length - 1][0] - pts[0][0] < 400) return null;
+  const n = pts.length, t0 = pts[0][0];
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (const [t, w] of pts) { const x = (t - t0) / 1000; sx += x; sy += w; sxx += x * x; sxy += x * w; }
+  const d = n * sxx - sx * sx; return d ? (n * sxy - sx * sy) / d : null;
+}
+
+// ================= SHOT-LOGIKK =================
+// fase: idle → brewing (pumpe går) → drip (pumpe stoppet, samler etterdrypp) → idle
+const shot = { phase: 'idle', startMs: 0, samples: [], baseline: 0, tarePending: false, tareDeadline: 0,
+               stopAt: null, weightAtStop: null, signalled: false, near: false, source: '', finishTimer: null };
+const DRIP_MS = 5000;
+
+function startShot(startMs, source) {
+  if (shot.phase === 'drip') finishShot();
+  Object.assign(shot, { phase: 'brewing', startMs, samples: [], baseline: weight, stopAt: null,
+                        weightAtStop: null, signalled: false, near: false, source });
+  if (settings.autoTare && cmdChar) {
+    sendScale(tareCmd()); shot.baseline = 0; shot.tarePending = true; shot.tareDeadline = Date.now() + 1500;
+  } else shot.tarePending = false;
+  viewing = null; markSelected();
+  $('chartTitle').textContent = 'Nåværende trekk';
+  $('manual').textContent = 'Stopp manuelt';
+  tick();
+}
+function stopShot(finalSec, kind) {
+  if (shot.phase !== 'brewing') return;
+  shot.stopAt = finalSec ?? (Date.now() - shot.startMs) / 1000;
+  shot.kind = kind;
+  shot.weightAtStop = currentShotWeight();
+  shot.phase = 'drip';
+  $('manual').textContent = 'Start manuelt';
+  clearTimeout(shot.finishTimer);
+  shot.finishTimer = setTimeout(finishShot, DRIP_MS);
+  render();
+}
+function currentShotWeight() { const s = shot.samples; return s.length ? s[s.length - 1][1] : 0; }
+function shotOnWeight(now, w) {
+  if (shot.phase === 'idle') return;
+  if (shot.tarePending) {
+    if (Math.abs(w) < 2) shot.tarePending = false;
+    else if (now > shot.tareDeadline) { shot.tarePending = false; shot.baseline = w; }   // taring feilet: trekk fra i stedet
+    else return;
+  }
+  if (shot.baseline == null) shot.baseline = w;   // vekten hadde ikke målt ennå da trekket startet
+  const t = (now - shot.startMs) / 1000, val = Math.round((w - shot.baseline) * 10) / 10;
+  shot.samples.push([Math.round(t * 100) / 100, val]);
+  if (shot.phase === 'brewing') checkSignal(val);
+}
+function checkSignal(val) {
+  if (!(settings.target > 0)) return;
+  const stopPoint = settings.target - dripEstimate();
+  if (!shot.near && val >= stopPoint - 4) shot.near = true;
+  if (!shot.signalled && val >= stopPoint) { shot.signalled = true; beep(988, 200, 3); }
+}
+function finishShot() {
+  clearTimeout(shot.finishTimer);
+  if (shot.phase === 'idle') return;
+  const finalW = currentShotWeight(), time = shot.stopAt ?? (Date.now() - shot.startMs) / 1000;
+  const wasFlush = finalW < 3;
+  shot.phase = 'idle';
+  if (wasFlush) {
+    lastInfo = `Flush ${nf1(time)} s (ikke lagret)`;
+  } else {
+    const rec = {
+      id: shot.startMs, when: shot.startMs, time: Math.round(time * 10) / 10,
+      out: finalW, dose: settings.dose || null, target: settings.target || null,
+      atStop: shot.weightAtStop, drip: shot.weightAtStop != null ? Math.round((finalW - shot.weightAtStop) * 10) / 10 : null,
+      source: shot.source, samples: downsample(shot.samples, 0.1),
+    };
+    shots.unshift(rec); shots = shots.slice(0, 300); store.set('kaffe.shots', shots);
+    lastInfo = `Lagret: ${nf1(finalW)} g på ${nf1(time)} s`;
+    renderTargets(); renderHistory();
+  }
+  render(); drawChart();
+}
+function downsample(s, step) {
+  const out = []; let last = -1;
+  for (const p of s) if (p[0] - last >= step) { out.push(p); last = p[0]; }
+  if (s.length && out[out.length - 1] !== s[s.length - 1]) out.push(s[s.length - 1]);
+  return out;
+}
+$('manual').onclick = () => {
+  if (shot.phase === 'brewing') stopShot(null, 'manuell');
+  else startShot(Date.now(), 'manuell');
+};
+
+// ================= MICRA =================
+// To måter: direkte over Bluetooth fra nettleseren (Bluefy/Chrome), eller via lokal server (server.py, port 8770).
+let lastInfo = '', micraOk = false;
+const SERVER_MODE = location.port === '8770';
+function micraStatus(txt, cls, title = '') {
+  $('micraTxt').textContent = 'Micra: ' + txt; $('micraDot').className = 'dot ' + (cls || ''); $('micraPill').title = title;
+}
+const MICRA_LABEL = {
+  'starter': ['starter …', 'warn'], 'logger-inn': ['logger inn …', 'warn'], 'søker': ['søker …', 'warn'],
+  'kobler-til': ['kobler til …', 'warn'], 'tilkoblet': ['tilkoblet', 'ok'], 'frakoblet': ['frakoblet', 'warn'],
+  'ikke-funnet': ['ikke funnet', 'err'], 'feil': ['feil', 'err'],
+};
+function connectServer() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'micra') {
+      const [txt, cls] = MICRA_LABEL[m.status] || [m.status, ''];
+      micraOk = m.status === 'tilkoblet'; micraStatus(txt, cls, m.detail || '');
+    } else if (m.type === 'telemetry') {
+      if (m.coffeeTemp != null) $('temp').textContent = `${Math.round(m.coffeeTemp)} °C`;
+    } else if (m.type === 'shot') onMicraShot(m);
+  };
+  ws.onclose = () => { micraOk = false; micraStatus('server ikke tilgjengelig', 'err'); setTimeout(connectServer, 2000); };
+}
+
+// --- direkte Bluetooth (protokoll fra pylamarzocco 2.6.0, se README) ---
+const MICRA = {
+  service: 'd30a7847-e12b-09a8-b04b-8e0922a9abab',
+  auth:    '0d0b7847-e12b-09a8-b04b-8e0922a9abab',
+  shot:    '0e0b7847-e12b-09a8-b04b-8e0922a9abab',
+};
+const BREW_KEYS = ['BrewingStartedGroup1DoseIndex', 'BrewingUpdateGroup1Ev', 'BrewingUpdateGroup1Backflush',
+  'BrewingUpdateGroup1Time', 'FlushStoppedGroup1Time', 'FlushStoppedGroup1DoseIndex', 'BrewingStoppedGroup1Time',
+  'BrewingStoppedGroup1DoseIndex', 'BrewingStoppedGroup1StopType', 'BrewingStoppedGroup1StopReason'];
+let micraDev = null, wantMicra = false, replayPending = false, mData = {}, mStart = null;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function micraToken(ask) {
+  let t = store.get('kaffe.micraToken', '');
+  if (!t || ask) {
+    t = (prompt('Lim inn Bluetooth-nøkkelen til Micraen (kjør «kopier-micra-nokkel.command» på Macen, og lim inn her):', '') || '').trim();
+    if (t) store.set('kaffe.micraToken', t);
+  }
+  return t;
+}
+async function setupMicra() {
+  micraStatus('kobler til …', 'warn');
+  const srv = await micraDev.gatt.connect();
+  const svc = await srv.getPrimaryService(MICRA.service);
+  const auth = await svc.getCharacteristic(MICRA.auth);
+  const tok = new TextEncoder().encode(micraToken(false));
+  await (auth.writeValueWithResponse ? auth.writeValueWithResponse(tok) : auth.writeValue(tok));
+  let ok = false;
+  for (let i = 0; i < 10 && !ok; i++) {
+    if (i) await sleep(100);
+    const v = await auth.readValue();
+    ok = v.byteLength >= 1 && v.getUint8(0) === 1;
+  }
+  if (!ok) { const e = new Error('Micraen godtok ikke nøkkelen'); e.auth = true; throw e; }
+  const ch = await svc.getCharacteristic(MICRA.shot);
+  mData = {}; mStart = null; replayPending = true;   // første varsel er en gjentakelse av forrige melding
+  ch.addEventListener('characteristicvaluechanged', onMicraNotify);
+  await ch.startNotifications();
+  setTimeout(() => { replayPending = false; }, 1500);
+  micraOk = true; micraStatus('tilkoblet', 'ok', micraDev.name || '');
+  $('micraBtn').textContent = 'Koble fra Micra';
+  render();
+}
+async function connectMicra() {
+  if (!navigator.bluetooth) { micraStatus('nettleseren støtter ikke Bluetooth (bruk Bluefy eller Chrome)', 'err'); return; }
+  if (!micraToken(false)) { micraStatus('mangler nøkkel', 'err'); return; }
+  try {
+    micraDev = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'MICRA' }], optionalServices: [MICRA.service] });
+    micraDev.addEventListener('gattserverdisconnected', onMicraLost);
+    wantMicra = true;
+    store.set('kaffe.micraName', micraDev.name || '');
+    await setupMicra();
+  } catch (e) { micraFailed(e); }
+}
+function micraFailed(e) {
+  micraOk = false;
+  if (e.auth) {
+    wantMicra = false; micraDev?.gatt?.disconnect();
+    micraStatus('feil nøkkel', 'err');
+    if (confirm('Micraen godtok ikke nøkkelen. Vil du lime inn en ny?')) micraToken(true);
+  } else micraStatus(e.name === 'NotFoundError' ? 'ingen valgt' : 'feil: ' + e.message, e.name === 'NotFoundError' ? '' : 'err');
+  $('micraBtn').textContent = 'Koble til Micra';
+}
+async function onMicraLost() {
+  micraOk = false;
+  if (!wantMicra) { micraStatus('ikke tilkoblet'); $('micraBtn').textContent = 'Koble til Micra'; render(); return; }
+  for (let i = 1; wantMicra && i <= 30; i++) {
+    micraStatus(`mistet forbindelsen, prøver igjen (${i}) …`, 'warn');
+    await sleep(2000);
+    try { await setupMicra(); return; } catch (e) { if (e.auth) return micraFailed(e); }
+  }
+  micraStatus('frakoblet. Trykk «Koble til Micra».', 'err');
+  $('micraBtn').textContent = 'Koble til Micra';
+}
+$('micraBtn').onclick = () => {
+  if (micraDev?.gatt?.connected) { wantMicra = false; micraDev.gatt.disconnect(); }
+  else connectMicra();
+};
+function onMicraNotify(ev) {
+  const now = Date.now();
+  const v = ev.target.value;
+  let p;
+  try { p = JSON.parse(new TextDecoder().decode(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)).replace(/\0+$/, '')); }
+  catch { return; }
+  if (replayPending) { replayPending = false; return; }
+  if (p.CoffeeBoiler1UpdateTemperature != null) $('temp').textContent = `${Math.round(p.CoffeeBoiler1UpdateTemperature)} °C`;
+  const b = {}; for (const k of BREW_KEYS) if (p[k] !== undefined && p[k] !== null) b[k] = p[k];
+  if (!Object.keys(b).length) return;                      // bare telemetri
+  if (b.BrewingStartedGroup1DoseIndex != null) { mData = {}; mStart = null; }   // ny shot/flush
+  Object.assign(mData, b);
+  const d = mData;
+  let state = null;
+  if (d.BrewingStoppedGroup1Time != null || d.BrewingStoppedGroup1DoseIndex != null || d.BrewingStoppedGroup1StopType != null
+      || d.BrewingStoppedGroup1StopReason != null || d.BrewingUpdateGroup1Ev === false) state = 'BrewingStopped';
+  else if (d.FlushStoppedGroup1Time != null || d.FlushStoppedGroup1DoseIndex != null) state = 'Flushed';
+  else if (d.BrewingUpdateGroup1Backflush === true) state = 'Backflushing';
+  else if (d.BrewingStartedGroup1DoseIndex != null || (d.BrewingUpdateGroup1Ev === true && d.BrewingUpdateGroup1Time != null)) state = 'Brewing';
+  if (!state) return;
+  const msg = { state, receivedMs: now, final: d.BrewingStoppedGroup1Time ?? d.FlushStoppedGroup1Time ?? null };
+  if (state === 'Brewing') {
+    msg.timer = d.BrewingUpdateGroup1Time || 0;
+    const s0 = now - msg.timer * 1000;
+    mStart = mStart == null ? s0 : Math.min(mStart, s0);  // varsler kan bare bli forsinket, så tidligste start er best
+    msg.startMs = mStart;
+  } else { mData = {}; mStart = null; }
+  onMicraShot(msg);
+}
+
+// --- husk enhetene: koble til igjen automatisk når siden åpnes (der nettleseren støtter det) ---
+async function autoReconnect() {
+  if (!navigator.bluetooth?.getDevices) return;
+  let devs = [];
+  try { devs = await navigator.bluetooth.getDevices(); } catch { return; }
+  for (const d of devs) {
+    if (d.name && d.name.startsWith('MICRA') && micraToken(false) && !SERVER_MODE) {
+      micraDev = d; wantMicra = true; d.addEventListener('gattserverdisconnected', onMicraLost);
+      setupMicra().catch(() => onMicraLost());
+    } else if (d.name && d.name === store.get('kaffe.scaleName', null)) {
+      device = d; wantScale = true; d.addEventListener('gattserverdisconnected', onScaleLost);
+      setupScale().catch(() => onScaleLost());
+    }
+  }
+}
+
+// --- hold skjermen våken mens siden er åpen ---
+let wakeLock = null;
+async function keepAwake() {
+  try { if (document.visibilityState === 'visible' && 'wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+}
+document.addEventListener('visibilitychange', keepAwake);
+
+function onMicraShot(m) {
+  if (m.state === 'Brewing') {
+    const start = m.startMs ?? (m.receivedMs - (m.timer || 0) * 1000);
+    // ny shot hvis vi ikke allerede brygger, eller starttiden er en helt annen
+    if (shot.phase !== 'brewing' || Math.abs(start - shot.startMs) > 3000) startShot(start, 'micra');
+    else shot.startMs = Math.min(shot.startMs, start);
+  } else if (m.state === 'BrewingStopped' || m.state === 'Flushed') {
+    if (shot.phase === 'brewing') stopShot(m.final, m.state === 'Flushed' ? 'flush' : 'shot');
+  }
+}
+
+// ================= VISNING =================
+function shotTime() {
+  if (shot.phase === 'brewing') return (Date.now() - shot.startMs) / 1000;
+  if (shot.phase === 'drip') return shot.stopAt;
+  return lastShotTime;
+}
+let lastShotTime = 0;
+function render() {
+  const showW = shot.phase !== 'idle' && !shot.tarePending ? currentShotWeight() : weight;
+  $('w').textContent = nf1(showW);
+  $('flow').textContent = flow == null ? '–' : nf1(Math.max(0, flow));
+  if (shot.phase !== 'idle') lastShotTime = shotTime();
+  $('t').textContent = nf1(shotTime() || 0);
+
+  const hero = $('hero'); hero.classList.remove('near', 'stop');
+  let banner;
+  if (shot.phase === 'brewing') {
+    if (shot.signalled) { hero.classList.add('stop'); banner = 'STOPP NÅ'; }
+    else if (shot.near) { hero.classList.add('near'); banner = `Snart … stopp ved ${nf1(settings.target - dripEstimate())} g`; }
+    else banner = shot.tarePending ? 'Tarer …' : (settings.target > 0 ? `Mål ${nf1(settings.target)} g` : 'Trekker …');
+  } else if (shot.phase === 'drip') banner = `Pumpe stoppet på ${nf1(shot.stopAt)} s, samler etterdrypp …`;
+  else banner = lastInfo || (micraOk ? 'Klar. Start pumpen.' : 'Koble til Micraen, eller bruk «Start manuelt».');
+  $('banner').textContent = banner;
+  renderStats();
+}
+function tick() {
+  render(); drawChart();
+  if (shot.phase === 'brewing') requestAnimationFrame(tick);
+}
+
+// ---------- graf ----------
+let viewing = null;  // valgt historikk-trekk
+function drawChart() {
+  const c = $('chart'), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+  if (c.width !== W * dpr) { c.width = W * dpr; c.height = H * dpr; }
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+  const cur = viewing ? viewing.samples : shot.samples;
+  const justSaved = !viewing && shot.phase === 'idle' && shots[0]?.id === shot.startMs;
+  const ghost = viewing ? shots[shots.indexOf(viewing) + 1] : shots[justSaved ? 1 : 0];
+  const target = viewing ? viewing.target : settings.target;
+  const all = [...cur, ...(ghost?.samples || [])];
+  const tMax = Math.max(30, ...all.map(p => p[0])) * 1.05;
+  const wMax = Math.max(40, (target || 0) * 1.15, ...all.map(p => p[1]));
+  const fMax = 5;
+  const L = 36, R = 34, T = 10, B = 26, pw = W - L - R, ph = H - T - B;
+  const x = t => L + (t / tMax) * pw, yW = w => T + ph - (w / wMax) * ph, yF = f => T + ph - (f / fMax) * ph;
+
+  g.font = '11px -apple-system, system-ui, sans-serif'; g.fillStyle = css('--muted'); g.strokeStyle = css('--line'); g.lineWidth = 1;
+  for (let t = 0; t <= tMax; t += 5) { g.beginPath(); g.moveTo(x(t), T); g.lineTo(x(t), T + ph); g.stroke(); g.fillText(t + ' s', x(t) - 8, H - 8); }
+  const wStep = wMax > 60 ? 20 : 10;
+  for (let w = 0; w <= wMax; w += wStep) { g.fillText(w + ' g', 2, yW(w) + 4); }
+  for (let f = 1; f < fMax; f++) g.fillText(f, W - R + 8, yF(f) + 4);
+  g.fillText('g/s', W - R + 6, T + 8);
+
+  if (target > 0) {
+    g.setLineDash([5, 5]); g.strokeStyle = css('--target'); g.beginPath(); g.moveTo(L, yW(target)); g.lineTo(L + pw, yW(target)); g.stroke(); g.setLineDash([]);
+  }
+  const line = (pts, color, width, fy) => {
+    if (pts.length < 2) return;
+    g.strokeStyle = color; g.lineWidth = width; g.lineJoin = 'round'; g.beginPath();
+    pts.forEach(([t, v], i) => i ? g.lineTo(x(t), fy(v)) : g.moveTo(x(t), fy(v))); g.stroke();
+  };
+  if (ghost) line(ghost.samples, css('--ghost'), 2, yW);
+  line(flowSeries(cur), css('--flow'), 1.75, yF);
+  line(cur, css('--accent'), 2.5, yW);
+  const stopAt = viewing ? viewing.time : shot.stopAt;
+  if (stopAt) { g.strokeStyle = css('--muted'); g.setLineDash([2, 4]); g.beginPath(); g.moveTo(x(stopAt), T); g.lineTo(x(stopAt), T + ph); g.stroke(); g.setLineDash([]); }
+}
+function flowSeries(s) {
+  const out = [];
+  for (let i = 0; i < s.length; i++) {
+    const win = []; for (let j = i; j >= 0 && s[i][0] - s[j][0] <= 1.2; j--) win.unshift([s[j][0] * 1000, s[j][1]]);
+    const f = regressionSlope(win); if (f != null) out.push([s[i][0], Math.max(0, Math.min(f, 5))]);
+  }
+  return out;
+}
+function renderStats() {
+  const s = viewing || (shot.phase === 'idle' && shots[0]?.id === shot.startMs ? shots[0] : null);
+  const time = s ? s.time : shotTime(), out = s ? s.out : (shot.phase !== 'idle' ? currentShotWeight() : null);
+  const dose = s ? s.dose : settings.dose;
+  const items = [
+    ['Tid', nf1(time) + ' s'], ['Ut', nf1(out) + ' g'],
+    ['Forhold', dose && out ? '1:' + nf1(out / dose) : '–'],
+    ['Snittflyt', out && time ? nf1(out / time) + ' g/s' : '–'],
+  ];
+  if (s && s.drip != null) items.push(['Etterdrypp', nf1(s.drip) + ' g']);
+  $('shotStats').innerHTML = items.map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join('');
+}
+
+// ---------- historikk ----------
+function renderHistory() {
+  $('histEmpty').style.display = shots.length ? 'none' : '';
+  $('hist').innerHTML = shots.map(s => {
+    const d = new Date(s.when);
+    const when = d.toLocaleDateString('no-NO', {day:'numeric', month:'short'}) + ' ' + d.toLocaleTimeString('no-NO', {hour:'2-digit', minute:'2-digit'});
+    return `<tr data-id="${s.id}"><td>${when}</td><td>${nf1(s.time)} s</td><td>${nf1(s.out)} g</td><td>${s.dose ? nf1(s.dose) + ' g' : '–'}</td>
+      <td>${s.dose ? '1:' + nf1(s.out / s.dose) : '–'}</td><td class="hide-sm">${nf1(s.out / s.time)} g/s</td><td class="hide-sm">${s.target ? nf1(s.target) + ' g' : '–'}</td></tr>`;
+  }).join('');
+  markSelected();
+}
+function markSelected() {
+  for (const tr of $('hist').querySelectorAll('tr')) tr.classList.toggle('sel', viewing && +tr.dataset.id === viewing.id);
+  $('delete').disabled = !viewing;
+}
+$('hist').onclick = e => {
+  const tr = e.target.closest('tr'); if (!tr || shot.phase === 'brewing') return;
+  const s = shots.find(s => s.id === +tr.dataset.id);
+  viewing = viewing === s ? null : s;
+  $('chartTitle').textContent = viewing ? 'Valgt trekk fra historikken' : 'Nåværende trekk';
+  markSelected(); drawChart(); renderStats();
+};
+$('delete').onclick = () => {
+  if (!viewing || !confirm('Slette dette trekket?')) return;
+  shots = shots.filter(s => s !== viewing); store.set('kaffe.shots', shots);
+  viewing = null; $('chartTitle').textContent = 'Nåværende trekk';
+  renderHistory(); renderTargets(); drawChart(); renderStats();
+};
+$('export').onclick = () => {
+  const blob = new Blob([JSON.stringify(shots, null, 1)], {type: 'application/json'});
+  const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(blob), download: `kaffe-trekk-${new Date().toISOString().slice(0,10)}.json`});
+  a.click(); URL.revokeObjectURL(a.href);
+};
+
+window.addEventListener('resize', drawChart);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawChart);
+renderTargets(); renderHistory(); render(); drawChart(); keepAwake();
+if (SERVER_MODE) { $('micraBtn').style.display = 'none'; micraStatus('venter på server', 'warn'); connectServer(); }
+autoReconnect();
+</script>
+</body>
+</html>
